@@ -1,0 +1,43 @@
+# Python virtual environment
+venv/
+env/
+ENV/
+
+# Python cache and compiled files
+__pycache__/
+*/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.so
+
+# Named pipes and temporary files
+.lgd-nfy0
+*.swp
+*.swo
+*~
+
+# Claude Code configuration
+.claude/
+
+# macOS system files
+.DS_Store
+
+# Editor temporary files
+.vscode/
+.idea/
+*.bak
+
+# Logs
+*.log
+
+# Large model files (exceed GitHub 100MB limit)
+archive/best.onnx
+archive/best.pt
+best_ncnn_model/model.ncnn.bin
+
+# Directories excluded
+/best_ncnn_model
+/bob
+/backup
+/archive

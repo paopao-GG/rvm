@@ -1,0 +1,11 @@
+ultralytics==8.4.12
+opencv-python==4.13.0.92
+evdev==1.9.3
+gpiozero==2.0.1
+numpy==2.4.2
+ncnn==1.0.20260114
+RPLCD
+adafruit-circuitpython-pca9685
+adafruit-circuitpython-servokit
+adafruit-blinka
+RPi.GPIO

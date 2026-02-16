@@ -1,0 +1,106 @@
+# ============================================================
+# RVM USEFUL COMMANDS
+# ============================================================
+
+# ============================================================
+# SYSTEMD SERVICE COMMANDS (Auto-start on boot)
+# ============================================================
+
+# Start services
+sudo systemctl start rvm-portal.service
+sudo systemctl start rvm-main.service
+
+# Stop services
+sudo systemctl stop rvm-portal.service
+sudo systemctl stop rvm-main.service
+
+# Restart services (after making code changes)
+sudo systemctl restart rvm-portal.service
+sudo systemctl restart rvm-main.service
+
+# Check service status
+sudo systemctl status rvm-portal.service
+sudo systemctl status rvm-main.service
+
+# Enable auto-start on boot (already enabled)
+sudo systemctl enable rvm-portal.service
+sudo systemctl enable rvm-main.service
+
+# Disable auto-start on boot
+sudo systemctl disable rvm-portal.service
+sudo systemctl disable rvm-main.service
+
+# View live service logs
+sudo journalctl -u rvm-portal.service -f
+sudo journalctl -u rvm-main.service -f
+
+# ============================================================
+# LOG FILES
+# ============================================================
+
+# Portal logs
+tail -f /tmp/rvm_portal.log
+
+# Main script logs
+tail -f /tmp/rvm_main_integrated.log
+
+# View both in parallel
+tail -f /tmp/rvm_portal.log /tmp/rvm_main_integrated.log
+
+# View only errors/warnings
+grep -E "WARNING|ERROR" /tmp/rvm_portal.log
+grep -E "WARNING|ERROR" /tmp/rvm_main_integrated.log
+
+# ============================================================
+# NETWORK & DEBUGGING
+# ============================================================
+
+# Check iptables rules
+sudo iptables -L FORWARD -v -n
+
+# Check connected devices
+ip neigh show
+
+# Check WiFi hotspot status
+nmcli connection show "P.E.T-O WI-FI"
+
+# Check hotspot IP (always 10.42.0.1)
+ip addr show wlan0
+
+# Check Ethernet IP
+ip addr show eth0
+
+# ============================================================
+# DATABASE
+# ============================================================
+
+# Database location
+# /home/raspi/rvm/rvm.db
+
+# View active users
+sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM users WHERE wifi_active = 1;"
+
+# View all users
+sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM users;"
+
+# View machine state
+sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM machine_state;"
+
+# ============================================================
+# EMERGENCY STOP (if systemd not working)
+# ============================================================
+
+# Force kill processes
+sudo pkill -9 -f portal.py
+pkill -9 -f main_integrated.py
+
+# ============================================================
+# NOTES
+# ============================================================
+
+# ✅ Services auto-start on boot (enabled by default)
+# ✅ No need to run start_phase1.sh anymore
+# ✅ After code changes, restart services:
+#    sudo systemctl restart rvm-portal.service rvm-main.service
+# ✅ Hotspot IP is always 10.42.0.1 regardless of upstream network
+# ✅ Portal URL: http://10.42.0.1
