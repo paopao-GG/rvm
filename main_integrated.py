@@ -80,12 +80,12 @@ except ImportError:
 
 
 # ── Config ────────────────────────────────────────────────────────
-MODEL_PATH = "best_ncnn_model"
-CLASS_NAMES = ["coke_litro", "coke_mismo", "water_bottle-1L", "water_bottle-350mL", "water_bottle-500mL"]
-COLORS = [(0, 0, 255), (0, 128, 255), (255, 0, 0), (255, 255, 0), (255, 0, 255)]
+# Built-in YOLO COCO model for generic bottle detection
+MODEL_PATH = "yolov8n.pt"  # Built-in YOLOv8 nano (fastest)
+BOTTLE_CLASS_ID = 39       # COCO dataset class ID for "bottle"
 
-VERIFY_TIMEOUT = 15     # seconds to wait for AI bottle detection
-VERIFY_CONF = 0.50      # minimum confidence for AI verification
+VERIFY_TIMEOUT = 30     # seconds to wait for AI bottle detection
+VERIFY_CONF = 0.60      # minimum confidence for AI verification (lower for generic detection)
 
 # LCD Display Messages (DRY - Define once, use everywhere)
 LCD_MSG_READY = "Ready"
@@ -536,22 +536,21 @@ class CameraThread:
 # ── Inference Helper ──────────────────────────────────────────────
 
 def run_inference(model: YOLO, frame, conf: float) -> Tuple:
-    """Run YOLO inference and annotate frame. Returns (frame, detected)."""
+    """Run YOLO inference for bottle detection. Returns (frame, detected)."""
+    # Only detect bottles (class 39 in COCO)
     results = model.predict(frame, imgsz=640, conf=conf,
+                            classes=[BOTTLE_CLASS_ID],  # Filter for bottles only
                             max_det=1, verbose=False, half=False)[0]
     detected = False
     if results.boxes is not None and len(results.boxes) > 0:
         for box in results.boxes:
-            cls_id = int(box.cls[0])
-            if cls_id >= len(CLASS_NAMES):
-                continue
             detected = True
             box_conf = float(box.conf[0])
-            color = COLORS[cls_id % len(COLORS)]
             x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f"{CLASS_NAMES[cls_id]} {box_conf:.2f}",
-                        (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 2)
+            # Draw bounding box in green for detected bottle
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 3)
+            cv2.putText(frame, f"BOTTLE {box_conf:.2f}",
+                        (x1, y1 - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
     return frame, detected
 
 
@@ -563,9 +562,10 @@ def main() -> None:
     logger.info("RVM Main Script - Phase 2 Starting")
     logger.info("="*60)
 
-    logger.info("Loading NCNN model from %s", MODEL_PATH)
-    model = YOLO(MODEL_PATH, task='segment')
-    logger.info("Model loaded successfully")
+    logger.info("Loading built-in YOLO model: %s", MODEL_PATH)
+    logger.info("(First run will download the model - may take a moment)")
+    model = YOLO(MODEL_PATH)  # Built-in detection model
+    logger.info("Model loaded successfully - generic bottle detection enabled")
 
     scanner_dev = find_scanner()
     if scanner_dev:
