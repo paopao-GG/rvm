@@ -213,7 +213,22 @@ PORTAL_PAGE = """
             </div>
         </div>
 
-        {% if wifi_active %}
+        {% if wifi_active and machine_locked_to_me %}
+            <!-- WiFi Active + Inserting Bottles -->
+            <div class="status">
+                <p>✅ WiFi Active</p>
+                <p>🔒 Inserting Bottles</p>
+            </div>
+            <div class="time-display">{{ remaining_time }}</div>
+            <div class="info">
+                <p>Scan bottles at the machine to add more time!</p>
+                <small>Time updates automatically as you insert</small>
+            </div>
+            <form method="POST" action="/done_inserting">
+                <button type="submit" class="secondary">Done Inserting ✅</button>
+            </form>
+
+        {% elif wifi_active %}
             <!-- WiFi Active - Show Countdown -->
             <div class="status">
                 <p>✅ Internet Access Active</p>
@@ -223,6 +238,9 @@ PORTAL_PAGE = """
                 <p>Enjoy your WiFi!</p>
                 <small>Time remaining updates automatically</small>
             </div>
+            <form method="POST" action="/lock_machine">
+                <button type="submit" class="secondary">Insert More Bottles ♻️</button>
+            </form>
 
         {% elif machine_locked_to_me %}
             <!-- Machine locked to this user - Show accumulated time -->
@@ -494,6 +512,19 @@ def cancel():
     if machine_state and machine_state['active_mac'] == client_mac:
         db.release_machine()
         logger.info("Machine lock released by %s (cancelled)", client_mac)
+
+    return redirect('/')
+
+
+@app.route('/done_inserting', methods=['POST'])
+def done_inserting():
+    """Release machine lock without stopping WiFi (used when inserting while WiFi is active)."""
+    client_mac = get_client_mac()
+    machine_state = db.get_machine_state()
+
+    if machine_state and machine_state['active_mac'] == client_mac:
+        db.release_machine()
+        logger.info("Machine lock released by %s (done inserting, WiFi stays active)", client_mac)
 
     return redirect('/')
 

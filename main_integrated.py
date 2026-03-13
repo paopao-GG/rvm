@@ -85,7 +85,7 @@ MODEL_PATH = "yolov8n.pt"  # Built-in YOLOv8 nano (fastest)
 BOTTLE_CLASS_ID = 39       # COCO dataset class ID for "bottle"
 
 VERIFY_TIMEOUT = 30     # seconds to wait for AI bottle detection
-VERIFY_CONF = 0.60      # minimum confidence for AI verification (lower for generic detection)
+VERIFY_CONF = 0.75      # minimum confidence for AI verification (lower for generic detection)
 
 # LCD Display Messages (DRY - Define once, use everywhere)
 LCD_MSG_READY = "Ready"

@@ -10,7 +10,7 @@ from ultralytics import YOLO
 
 # ── Configuration ──────────────────────────────────────────────
 BUILTIN_MODEL = "yolov8n.pt"  # Options: yolov8n.pt (fastest), yolov8s.pt, yolov8m.pt
-CONFIDENCE = 0.50  # 50% confidence threshold for generic bottle detection
+CONFIDENCE = 0.60  # 50% confidence threshold for generic bottle detection
 BOTTLE_CLASS_ID = 39  # COCO dataset class ID for "bottle"
 
 print("="*60)
