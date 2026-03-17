@@ -1,82 +1,147 @@
-Reverse Vending Machine (RVM) - main.py Code Explanation
-========================================================
+P.E.T-O Reverse Vending Machine (RVM)
+======================================
 
 OVERVIEW
 --------
-A Reverse Vending Machine system running on Raspberry Pi 5 that:
-1. Scans a bottle's barcode to check if it's a registered bottle type
-2. Uses AI (YOLO) to visually confirm it's actually a bottle
-3. Opens a relay (e.g. to drop the bottle into a bin) if verified
+A Reverse Vending Machine running on Raspberry Pi 5 that gives users
+free WiFi in exchange for empty plastic bottles. The system:
+
+1. Creates a WiFi hotspot with a captive portal
+2. Scans bottle barcodes to identify the bottle type
+3. Uses AI (YOLOv8) to visually confirm a real bottle is present
+4. Opens a servo-driven intake door for the user to drop the bottle
+5. Verifies the bottle was actually inserted via a load cell (weight sensor)
+6. Credits WiFi time to the user's account
+7. Manages internet access per user via iptables MAC filtering
 
 HARDWARE
 --------
-- Raspberry Pi 5
+- Raspberry Pi 5 (main controller + WiFi hotspot)
+- Ethernet cable (connects RPi to router/modem for WAN internet)
 - MH-ET Live Scanner V3 (USB barcode scanner, acts as HID keyboard)
-- 5V Relay Module on GPIO22 (wired via NPN transistor for 3.3V->5V level shift)
-- USB Camera (for AI bottle detection)
+- USB Webcam (for AI bottle detection)
+- PCA9685 16-channel PWM driver (I2C servo controller on I2C0, address 0x40)
+- 3x MG995 continuous rotation servo motors:
+    - Servo 1 (channel 1): Intake door
+    - Servo 2 (channel 15): Exit door
+    - Servo 3 (channel 14): Reject door
+- HX711 + Load cell (weight sensor to confirm bottle insertion)
+- 4x20 I2C LCD display (PCF8574 backpack, address 0x27, on I2C1)
+
+AI MODEL
+--------
+- Model: YOLOv8n (YOLOv8 Nano) - ultralytics built-in pretrained model
+- File: yolov8n.pt (auto-downloaded on first run)
+- Dataset: COCO (80 classes, using class ID 39 = "bottle")
+- Input size: 640x640
+- Confidence threshold: 0.75
+- Inference: CPU (no GPU required on RPi 5)
+- Purpose: Detects whether the object shown to the camera is a bottle.
+  This prevents users from scanning a barcode without presenting a real bottle.
+
+A custom NCNN model (best_ncnn_model/) is also available for dual
+verification via dual_verification.py, but the production system uses
+the built-in YOLOv8n for simplicity and reliability.
 
 WIRING
 ------
-TESTED IT AND IT WORKS RAW, DIRECTLY CONNECT THE IN OF THE RELAY TO THE GPIO, NO NEED TRANSISTORS
-Relay:
-  RPi5 GPIO22 (pin 15) --> 1k resistor --> NPN transistor base
-  Transistor collector  --> Relay IN pin
-  Transistor emitter    --> GND
-  Relay VCC             --> RPi5 5V (pin 2 or 4)
-  Relay GND             --> RPi5 GND
+PCA9685 Servo Controller (I2C0):
+  RPi5 GPIO1 (Pin 28) --> PCA9685 SCL
+  RPi5 GPIO0 (Pin 27) --> PCA9685 SDA
+  RPi5 3.3V           --> PCA9685 VCC
+  RPi5 GND            --> PCA9685 GND
+  External 5-6V PSU   --> PCA9685 V+ (servo power, separate from logic)
 
-If the relay triggers at 3.3V (test first), you can skip the transistor and
-wire GPIO22 directly to Relay IN.
+  Requires: dtoverlay=i2c0-pi5 in /boot/firmware/config.txt
 
-Scanner:
-  Just plug into any USB port via micro-USB cable.
+Servo Motors (connected to PCA9685 PWM channels):
+  Servo 1 (intake)  --> PCA9685 Channel 1
+  Servo 2 (exit)    --> PCA9685 Channel 15
+  Servo 3 (reject)  --> PCA9685 Channel 14
+
+HX711 Load Cell:
+  HX711 DOUT  --> RPi5 GPIO5 (Pin 29)
+  HX711 SCK   --> RPi5 GPIO6 (Pin 31)
+  HX711 VCC   --> RPi5 5V (Pin 2 or 4)
+  HX711 GND   --> RPi5 GND
+
+LCD Display (I2C1 - default RPi I2C bus):
+  LCD SDA --> RPi5 GPIO2 (Pin 3)
+  LCD SCL --> RPi5 GPIO3 (Pin 5)
+  LCD VCC --> RPi5 5V
+  LCD GND --> RPi5 GND
+
+Barcode Scanner:
+  Plug into any USB port via micro-USB cable (HID keyboard device).
 
 DEPENDENCIES
 ------------
-  pip install ultralytics opencv-python evdev gpiozero
+Python packages (install in a venv):
+  pip install ultralytics opencv-python evdev flask RPLCD hx711
+  pip install adafruit-circuitpython-servokit adafruit-blinka
+
+System packages:
   sudo apt install python3-lgpio
+
+Full list in requirements.txt.
 
 HOW TO RUN
 ----------
-  python main.py
+Option 1 - Startup script (recommended):
+  chmod +x start_phase1.sh
+  ./start_phase1.sh
 
-If the barcode scanner needs exclusive access (grab), run with sudo:
-  sudo /home/raspi/rvm/venv/bin/python main.py
+Option 2 - Manual (two terminals):
+  Terminal 1 (portal - needs sudo for port 80 + iptables):
+    sudo python3 portal.py
+
+  Terminal 2 (main script - needs sudo for scanner grab):
+    sudo python3 main_integrated.py
+
+Both scripts share the SQLite database at /home/raspi/rvm/rvm.db.
+
+Logs:
+  Portal:  tail -f /tmp/rvm_portal.log
+  Main:    tail -f /tmp/rvm_main_integrated.log
 
 
 PROGRAM FLOW
 ------------
 
-  +---------------------------+
-  |  Load YOLO NCNN model     |
-  |  Find barcode scanner     |
-  |  Initialize relay GPIO22  |
-  +---------------------------+
+  User connects to "P.E.T-O WI-FI" hotspot
+  Phone opens captive portal at http://10.42.0.1
               |
               v
-  +---------------------------+
-  |  STEP 1: WAIT FOR SCAN   |  <-- Blocks here, no camera running
-  |  (barcode scanner reads)  |
-  +---------------------------+
+  +----------------------------------+
+  |  Portal: "Insert Bottles" button |
+  |  User taps button               |
+  |  Machine locks to user's MAC    |
+  +----------------------------------+
+              |
+              v
+  +----------------------------------+
+  |  STEP 1: WAIT FOR BARCODE SCAN  |  <-- LCD: "Scan bottle"
+  |  (scanner reads EAN-13 barcode) |
+  +----------------------------------+
               |
          barcode read
               |
               v
-  +---------------------------+
-  |  Check BARCODE_MAP        |
-  |  Is it a registered       |  -- NO --> print "Unknown barcode", loop back
-  |  bottle type?             |
-  +---------------------------+
+  +----------------------------------+
+  |  Check BARCODE_MAP               |
+  |  Handles clipped scans          |  -- NO MATCH --> LCD: "Unknown bottle"
+  |  (suffix/prefix/substring)      |                  loop back to Step 1
+  +----------------------------------+
               |
-             YES
+            MATCH
               |
               v
-  +---------------------------+
-  |  STEP 2: OPEN CAMERA      |
-  |  Run YOLO inference        |  <-- 10 second timeout
-  |  Looking for any bottle    |
-  |  with confidence >= 0.50   |
-  +---------------------------+
+  +----------------------------------+
+  |  STEP 2: AI VERIFICATION        |  <-- LCD: "Verifying..."
+  |  Open camera, run YOLOv8n       |      30 second timeout
+  |  Looking for COCO class 39      |
+  |  (bottle) with conf >= 0.75     |
+  +----------------------------------+
               |
         bottle detected?
          /          \
@@ -84,117 +149,209 @@ PROGRAM FLOW
         |              |
         v              v
   +-----------+   +------------------+
-  |  STEP 3:  |   | "Verification    |
-  |  Relay ON |   |  failed"         |
-  |  (5 sec)  |   +------------------+
-  |  Relay OFF|            |
-  +-----------+            |
-        |                  |
-        +------+  +--------+
-               |  |
-               v  v
-        (loop back to Step 1)
+  |  STEP 3:  |   | LCD: "No bottle" |
+  |  Servo 1  |   | "Try again"      |
+  |  opens    |   | loop back         |
+  |  (intake) |   +------------------+
+  +-----------+
+        |
+        v
+  +----------------------------------+
+  |  STEP 4: WEIGHT DETECTION        |  <-- LCD: "Drop bottle now"
+  |  HX711 load cell monitors for   |      5 second timeout
+  |  weight change (1000 raw units) |
+  |  Needs 3 consecutive readings   |
+  +----------------------------------+
+              |
+        weight detected?
+         /          \
+       YES           NO
+        |              |
+        v              v
+  +-----------+   +------------------+
+  |  ACCEPTED |   |  REJECTED        |
+  |  +time to |   |  Servo 3 closes  |
+  |  user's   |   |  (reject path)   |
+  |  account  |   |  Servo 2 opens   |
+  |           |   |  (exit)          |
+  |  Servo 2  |   |  All close       |
+  |  opens    |   +------------------+
+  |  (exit)   |          |
+  +-----------+          |
+        |                |
+        v                v
+  +----------------------------------+
+  |  Servo 1 closes (intake door)   |
+  |  LCD: "Scan next bottle"        |
+  |  Loop back to Step 1            |
+  +----------------------------------+
+              |
+              v
+  User taps "Start WiFi" on portal
+  --> iptables allows user's MAC
+  --> countdown timer starts
+  --> user has internet access
+
+
+SERVO BEHAVIOR
+--------------
+All three servos are continuous rotation (MG995 clones), not positional.
+They are controlled by setting a speed angle for a timed duration, then
+sending a stop angle to halt rotation.
+
+  Servo 1 (Intake door):
+    Stop: 91°  |  Open: 130° for 0.3s  |  Close: 60° for 0.3s
+
+  Servo 2 (Exit door):
+    Stop: 91°  |  Open: 130° for 0.3s  |  Close: 60° for 0.3s
+    Stays open for 5 seconds after accept/reject
+
+  Servo 3 (Reject door):
+    Stop: 92°  |  Open: 20° for 0.3s   |  Close: 160° for 0.3s
+    Default position: OPEN
+    Closes to push rejected items out
+
+
+LOAD CELL BEHAVIOR
+------------------
+- HX711 ADC with 128x gain
+- Averages 10 samples per reading
+- Baseline (tare) taken with 3 separate readings averaged
+- Weight change threshold: 1000 raw units
+- Requires 3 consecutive readings above threshold (filters noise)
+- 5-second timeout window for bottle insertion
+- Re-tares after each bottle cycle
+
+
+REGISTERED BARCODES
+-------------------
+  4800100123456  -> water_bottle-500mL   (5 min)
+  4800014147083  -> water_bottle-350mL   (3 min 30s)
+  4800602087937  -> water_bottle-1L      (10 min)
+  4800100456789  -> coke_2L              (20 min)
+  4801981118502  -> coke_mismo           (3 min 20s)
+  8997035600010  -> pocari_350mL         (3 min 30s)
+  4801981116270  -> sprite_1.5L          (15 min)
+  4801981116171  -> royal_1.5L           (15 min)
+  4800049720121  -> natures_spring_1000ml (10 min)
+
+Barcode matching handles clipped scans (11-12 digits) by trying
+suffix, prefix, and substring matches against the full 13-digit codes.
+
+To add new bottles:
+  1. Scan barcode with test/test_scanner.py to get the exact string
+  2. Add to BARCODE_MAP in main_integrated.py
+  3. Add to BOTTLE_DISPLAY for LCD name
+  4. Add to bottles table in db.py init_db()
+
+
+WIFI TIME FORMAT
+----------------
+Time values in the database use a custom format: X.Y
+  X = whole minutes
+  Y = additional seconds (multiplied by 10)
+
+Examples:
+  3.5  = 3 minutes + 50 seconds = 230 seconds
+  3.2  = 3 minutes + 20 seconds = 200 seconds
+  5    = 5 minutes + 0 seconds  = 300 seconds
+  10   = 10 minutes             = 600 seconds
+  15   = 15 minutes             = 900 seconds
 
 
 CODE STRUCTURE
 --------------
 
-CONFIG (lines 28-46)
-  MODEL_PATH       - Path to YOLO NCNN model folder
-  CLASS_NAMES      - Bottle classes the model was trained on
-  RELAY_PIN        - GPIO pin number (BCM) for the relay
-  RELAY_OPEN_SECS  - How long the relay stays open (5 seconds)
-  VERIFY_TIMEOUT   - How long AI has to detect a bottle (10 seconds)
-  VERIFY_CONF      - Minimum AI confidence to accept (0.50)
-  BARCODE_MAP      - Dictionary mapping barcode strings to bottle type names
+main_integrated.py  (~985 lines)
+  The main hardware controller. Handles:
+  - Barcode scanning via evdev (HID keyboard)
+  - AI bottle verification via YOLOv8n
+  - 3 servo motors via PCA9685 (continuous rotation, timed)
+  - HX711 load cell for weight detection
+  - 4x20 I2C LCD display
+  - Machine state polling from SQLite
 
-_KEY_MAP (lines 48-70)
-  Maps Linux evdev keycodes to characters. Includes both number row
-  (KEY_0-KEY_9) and numpad (KEY_KP0-KEY_KP9) since the MH-ET scanner
-  may output either type depending on its configuration.
+portal.py  (~670 lines)
+  Flask captive portal server. Handles:
+  - User-facing web interface
+  - Machine lock/unlock via SQLite
+  - WiFi session start/stop
+  - iptables MAC allow/revoke
+  - Background session monitor (expires users)
+  - Captive portal detection endpoints
 
-find_scanner() (lines 75-94)
-  Searches /dev/input/ devices for the barcode scanner by name.
-  Looks for keywords: "barcode", "scanner", "mh-et", "wch".
-  The MH-ET scanner shows up as "WCH.CN 8 Serial To HID".
-  Closes non-matching devices to avoid file descriptor leaks.
+db.py  (~257 lines)
+  Shared SQLite database module. Three tables:
+  - users: MAC, accumulated_time, wifi_active, session timestamps
+  - bottles: bottle_type, time_minutes
+  - machine_state: active_mac, lock_started (single row)
 
-wait_for_barcode() (lines 97-111)
-  Blocking function that reads HID keyboard events from the scanner.
-  Accumulates characters in a buffer until Enter (KEY_ENTER or KEY_KPENTER)
-  is pressed, then returns the complete barcode string.
-  This runs in the main thread with no camera active to avoid input conflicts.
-
-RelayController (lines 116-145)
-  Wraps gpiozero OutputDevice for the relay.
-  - on()      : activates the relay
-  - off()     : deactivates the relay
-  - cleanup() : turns off and releases the GPIO pin
-  Gracefully degrades if gpiozero is not available (prints simulated output).
-
-CameraThread (lines 150-188)
-  Runs camera capture in a background thread so frame reading doesn't
-  block YOLO inference. Uses a lock to safely share frames between
-  the capture thread and main thread. Copies frames on read to prevent
-  torn reads.
-
-run_inference() (lines 193-210)
-  Runs YOLO prediction on a single frame.
-  Draws bounding boxes and class labels on detected bottles.
-  Returns the annotated frame and a boolean (was a bottle detected?).
-
-main() (lines 215-308)
-  The main loop with 3 sequential steps:
-
-  Step 1 - Barcode Scan:
-    Blocks on wait_for_barcode(). No camera is running.
-    Checks the scanned string against BARCODE_MAP.
-    Unknown barcodes are rejected and it loops back.
-
-  Step 2 - AI Verification:
-    Opens the camera and runs YOLO inference every frame.
-    Shows a live preview with "Verifying: [type] (Xs)" overlay.
-    If any registered bottle class is detected with confidence >= 0.50,
-    verification passes. Times out after 10 seconds.
-
-  Step 3 - Relay:
-    If verified: relay ON for 5 seconds, then OFF.
-    If not verified: prints failure message.
-    Then loops back to Step 1.
-
-
-REGISTERED BARCODES
--------------------
-  4800100123456 -> water_bottle-500mL
-  4800014147083 -> water_bottle-350mL
-  4800602087937 -> water_bottle-1L
-  4800100456789 -> coke_2L
-  4801981118502 -> coke_mismo
-  8997035600010 -> pocari_350mL
-
-To add new bottles: scan the barcode with test_scanner.py to get the
-exact string, then add it to the BARCODE_MAP dictionary in main.py.
+utils.py  (~70 lines)
+  Shared utilities:
+  - format_time(seconds) -> "MM:SS" string
+  - validate_ip_address(ip) -> bool
+  - validate_mac_address(mac) -> bool
 
 
 TESTING UTILITIES
 -----------------
-  test_scanner.py  - Standalone barcode scanner test.
-                     Prints exactly what the scanner reads.
-                     Use this to find barcode strings for BARCODE_MAP.
+All test scripts are in the test/ directory:
 
-  Relay test:
-    sudo python -c "
-    from gpiozero import OutputDevice
-    from time import sleep
-    r = OutputDevice(22)
-    print('ON'); r.on(); sleep(3)
-    print('OFF'); r.off(); r.close()
-    "
+Barcode:
+  test/portal_test.py          - Portal integration test
+
+Load Cell (HX711):
+  test/calibrate_load_cell.py  - Full calibration procedure
+  test/test_load_cell.py       - Verify load cell connection
+  test/test_load_cell_raw.py   - Raw ADC value readout
+  test/test_hx711_quick.py     - Quick connection test
+  test/simple_load_cell.py     - Simple weight reading
+
+Servo Motors:
+  test/calibrate_stop_angle.py - Find the stop angle for servos 1 & 2
+  test/calibrate_servo3_stop.py- Find the stop angle for servo 3
+  test/test_open_close.py      - Test door open/close timing
+  test/test_continuous_servos.py- Test continuous rotation behavior
+  test/test_servo_simple.py    - Basic servo movement test
+  test/test_servos.py          - Full servo test suite
+
+AI Detection:
+  test/test_yolo_builtin.py    - Test built-in YOLOv8n model
+  test/test_yolo_dual.py       - Test dual verification mode
+  test/test_yolo_live.py       - Live camera detection test
 
 
 GRACEFUL DEGRADATION
 --------------------
 The system runs even without hardware connected:
 - No scanner: falls back to manual keyboard input
-- No GPIO/relay: prints simulated ON/OFF messages
-- No camera: skips verification and loops back
+- No PCA9685/servos: prints simulated OPEN/CLOSE messages
+- No HX711/load cell: rejects all items (cannot verify insertion)
+- No LCD: runs silently without display output
+- No camera: skips AI verification, loops back to scan
+
+
+DEBUGGING
+---------
+  # View logs
+  tail -f /tmp/rvm_main_integrated.log
+  tail -f /tmp/rvm_portal.log
+
+  # View database
+  sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM users;"
+  sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM machine_state;"
+  sqlite3 /home/raspi/rvm/rvm.db "SELECT * FROM bottles;"
+
+  # Check iptables rules
+  sudo iptables -L FORWARD -v -n | grep MAC
+
+  # Reset database
+  rm /home/raspi/rvm/rvm.db
+  python3 -c "import db"
+
+  # Check hotspot
+  nmcli connection show --active | grep Hotspot
+
+  # Stop everything
+  sudo pkill -f portal.py
+  pkill -f main_integrated.py
