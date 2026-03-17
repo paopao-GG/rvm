@@ -31,7 +31,12 @@ __pycache__/
 # Logs
 *.log
 
-# Large model files (exceed GitHub 100MB limit)
+# Database (generated at runtime)
+rvm.db
+
+# Model weights (large binary files)
+*.pt
+*.onnx
 archive/best.onnx
 archive/best.pt
 best_ncnn_model/model.ncnn.bin
